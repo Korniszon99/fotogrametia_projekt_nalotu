@@ -13,12 +13,12 @@ Aplikacja webowa Django do projektowania nalotów fotogrametrycznych dla zdjęć
 
 ```
 photogrammetry_project/
-├── photogrammetry_project/
+├── fotogrametria_proekt_nalotu/
 │   ├── __init__.py
 │   ├── settings.py
 │   ├── urls.py
 │   └── wsgi.py
-├── photogrammetry/
+├── planner_nalotu/
 │   ├── migrations/
 │   │   └── 0001_initial.py
 │   ├── templates/
