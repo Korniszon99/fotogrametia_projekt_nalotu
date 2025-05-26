@@ -128,6 +128,10 @@ Aplikacja generuje interaktywną wizualizację zawierającą:
 - 🔵 **Centra zdjęć** - niebieskie punkty
 - 📊 **Parametry nalotu** - tabela z wynikami
 
+![img.png](img.png)
+
+![img_1.png](img_1.png)
+
 ## Funkcje automatyczne
 
 - **Walidacja danych** - sprawdzanie poprawności wprowadzanych wartości
