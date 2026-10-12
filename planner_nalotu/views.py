@@ -9,7 +9,8 @@ from io import BytesIO
 import base64
 from django.shortcuts import render
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.http import require_POST
 from .models import Camera, Aircraft
 
 
@@ -23,6 +24,16 @@ class FlightPlanCalculator:
         self.user_altitude = altitude  # User-provided altitude (m)
         self.user_speed = speed  # User-provided speed (km/h)
 
+        values = [area_width, area_height, gsd, camera.focal_length,
+                  camera.sensor_width, camera.sensor_height, camera.pixel_size]
+        values += [v for v in (altitude, speed) if v is not None]
+        if any(not math.isfinite(v) or v <= 0 for v in values):
+            raise ValueError("All dimensions, GSD, altitude and speed must be finite and positive")
+        if altitude is not None and altitude > aircraft.max_altitude:
+            raise ValueError("Altitude exceeds aircraft maximum")
+        if speed is not None and not aircraft.min_speed <= speed <= aircraft.max_speed:
+            raise ValueError("Speed is outside aircraft operating range")
+
         # Standardowe pokrycia
         self.p_target = 0.6  # pokrycie wzdłużne
         self.q_target = 0.3  # pokrycie poprzeczne
@@ -33,6 +44,11 @@ class FlightPlanCalculator:
             self.W = self.user_altitude
         else:
             self.W = (self.camera.focal_length * self.gsd * 1000) / self.camera.pixel_size
+
+        if self.W > self.aircraft.max_altitude:
+            raise ValueError("Required altitude exceeds aircraft maximum")
+        if self.user_altitude is not None:
+            self.gsd = self.W * self.camera.pixel_size / (self.camera.focal_length * 1000)
 
         # Zasięgi terenowe zdjęć
         self.Lx = (self.camera.sensor_width * self.gsd * 1000) / self.camera.pixel_size
@@ -46,7 +62,7 @@ class FlightPlanCalculator:
         self.nominal_strips = self.Dy / self.By
 
         # Skorygowana liczba szeregów
-        self.corrected_strips = math.ceil(self.nominal_strips)
+        self.corrected_strips = math.ceil(self.nominal_strips) + 1
 
         # Skorygowane bazy
         if self.corrected_strips > 1:
@@ -64,6 +80,9 @@ class FlightPlanCalculator:
         # Całkowita liczba zdjęć
         self.total_photos = self.corrected_strips * self.photos_per_strip
 
+        if self.total_photos > 2000:
+            raise ValueError("Plan exceeds the visualization limit of 2000 images")
+
         # Długość trasy lotu
         strip_length = self.Dx + 2 * self.Lx  # z zapasem
         total_flight_distance = self.corrected_strips * strip_length
@@ -74,6 +93,7 @@ class FlightPlanCalculator:
 
         return {
             'flight_height': round(self.W, 3),
+            'gsd': self.gsd,
             'ground_coverage_x': round(self.Lx, 3),
             'ground_coverage_y': round(self.Ly, 3),
             'base_x': round(self.Bx, 3),
@@ -89,6 +109,7 @@ class FlightPlanCalculator:
         }
 
 
+@ensure_csrf_cookie
 def flight_planner(request):
     cameras = Camera.objects.all()
     aircraft = Aircraft.objects.all()
@@ -165,7 +186,7 @@ def flight_planner(request):
     })
 
 
-@csrf_exempt
+@require_POST
 def calculate_flight(request):
     if request.method == 'POST':
         try:
@@ -176,8 +197,8 @@ def calculate_flight(request):
             gsd = float(data['gsd'])
             camera_id = int(data['camera'])
             aircraft_id = int(data['aircraft'])
-            altitude = float(data['altitude']) if 'altitude' in data else None
-            speed = float(data['speed']) if 'speed' in data else None
+            altitude = float(data['altitude']) if data.get('altitude') not in (None, '') else None
+            speed = float(data['speed']) if data.get('speed') not in (None, '') else None
 
             camera = Camera.objects.get(id=camera_id)
             aircraft = Aircraft.objects.get(id=aircraft_id)
@@ -192,16 +213,13 @@ def calculate_flight(request):
                 'aircraft_name': aircraft.name
             })
 
-        except Exception as e:
-            return JsonResponse({
-                'success': False,
-                'error': str(e)
-            })
+        except (ValueError, TypeError, KeyError, Camera.DoesNotExist, Aircraft.DoesNotExist) as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
 
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
 
 
-@csrf_exempt
+@require_POST
 def generate_visualization(request):
     if request.method == 'POST':
         try:
@@ -212,8 +230,8 @@ def generate_visualization(request):
             gsd = float(data['gsd'])
             camera_id = int(data['camera'])
             aircraft_id = int(data['aircraft'])
-            altitude = float(data['altitude']) if 'altitude' in data else None
-            speed = float(data['speed']) if 'speed' in data else None
+            altitude = float(data['altitude']) if data.get('altitude') not in (None, '') else None
+            speed = float(data['speed']) if data.get('speed') not in (None, '') else None
 
             camera = Camera.objects.get(id=camera_id)
             aircraft = Aircraft.objects.get(id=aircraft_id)
@@ -288,7 +306,7 @@ Zdjęć w szeregu: {results['photos_per_strip']}
 Całkowita liczba zdjęć: {results['total_photos']}
 Pokrycie wzdłużne: {results['corrected_overlap_p']:.1%}
 Pokrycie poprzeczne: {results['corrected_overlap_q']:.1%}
-Czas lotu: {results['flight_time']:.1f} min"""
+Czas lotu: {results['flight_time'] / 60:.1f} min"""
 
             ax.text(0.02, 0.98, params_text, transform=ax.transAxes, fontsize=10,
                     verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
@@ -312,10 +330,7 @@ Czas lotu: {results['flight_time']:.1f} min"""
                 'results': results
             })
 
-        except Exception as e:
-            return JsonResponse({
-                'success': False,
-                'error': str(e)
-            })
+        except (ValueError, TypeError, KeyError, Camera.DoesNotExist, Aircraft.DoesNotExist) as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
 
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
