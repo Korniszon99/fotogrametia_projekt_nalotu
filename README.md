@@ -1,173 +1,64 @@
-# System Planowania Nalotów Fotogrametrycznych - Django
+# Photogrammetric Flight Planner
 
-## Opis projektu
+**Plan image acquisition from camera geometry, ground sample distance and overlap requirements.**
 
-Aplikacja webowa Django do projektowania nalotów fotogrametrycznych dla zdjęć pionowych. System umożliwia:
+Python · Django · Matplotlib · photogrammetry · numerical geometry
 
-- ✈️ **Obliczanie parametrów nalotu** - wysokość lotu, liczba szeregów, liczba zdjęć, pokrycia
-- 📊 **Interaktywną wizualizację** - graficzny plan nalotu z trasami lotu i pozycjami zdjęć  
-- 🎛️ **Intuicyjny interfejs GUI** - nowoczesny interfejs webowy z automatycznym odświeżaniem
-- 📱 **Responsywność** - działa na komputerach, tabletach i telefonach
+This educational application calculates aerial image footprints, altitude, strip spacing, image count and estimated flight duration, then renders the acquisition layout. It connects geometric camera models with the data acquisition stage of a computer vision workflow.
 
-## Struktura projektu
+## Capabilities
 
-```
-photogrammetry_project/
-├── fotogrametria_proekt_nalotu/
-│   ├── __init__.py
-│   ├── settings.py
-│   ├── urls.py
-│   └── wsgi.py
-├── planner_nalotu/
-│   ├── migrations/
-│   │   └── 0001_initial.py
-│   ├── templates/
-│   │   └── photogrammetry/
-│   │       └── flight_planner.html
-│   ├── __init__.py
-│   ├── admin.py
-│   ├── apps.py
-│   ├── models.py
-│   ├── urls.py
-│   └── views.py
-├── manage.py
-└── requirements.txt
-```
+| Input | Result |
+| --- | --- |
+| Area width/height and target GSD | Required altitude and image footprint |
+| Sensor dimensions, focal length and pixel pitch | Camera-dependent ground coverage |
+| Optional altitude override | Recomputed effective GSD and footprint |
+| Aircraft operating range and speed | Validated flight parameters and duration |
+| Along-track/across-track overlap | Strip spacing and required image count |
 
-## Instalacja i uruchomienie
+![Flight planner interface](img.png)
+![Flight layout visualization](img_1.png)
 
-### Krok 1: Przygotowanie środowiska
+## Quick start
+
+Python 3.12 is the tested web runtime.
 
 ```bash
-# Utworzenie wirtualnego środowiska
-python -m venv photogrammetry_env
-
-# Aktywacja środowiska
-# Windows:
-photogrammetry_env\Scripts\activate
-# Linux/Mac:
-source photogrammetry_env/bin/activate
-```
-
-### Krok 2: Instalacja zależności
-
-```bash
-# Instalacja pakietów z requirements.txt
-pip install -r requirements.txt
-```
-
-### Krok 3: Konfiguracja bazy danych
-
-```bash
-# Utworzenie migracji
-python manage.py makemigrations
-
-# Zastosowanie migracji
+git clone https://github.com/Korniszon99/fotogrametia_projekt_nalotu.git
+cd fotogrametia_projekt_nalotu
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
 python manage.py migrate
-
-# Utworzenie superużytkownika (opcjonalne)
-python manage.py createsuperuser
-```
-
-### Krok 4: Uruchomienie serwera
-
-```bash
-# Uruchomienie serwera deweloperskiego
 python manage.py runserver
 ```
 
-Aplikacja będzie dostępna pod adresem: **http://127.0.0.1:8000/**
+Open <http://127.0.0.1:8000/>. Initial camera and aircraft examples are added when the empty planner is opened. On Windows use `.venv\Scripts\activate`.
 
-### Alternatywa:
-Możesz użyć Dockera do uruchomienia aplikacji:
+For a local container demo: `docker compose up --build`. The container uses Gunicorn and persists SQLite in a named volume. The supplied Compose configuration is a localhost demo with debug enabled.
+
+## Geometry and units
+
+For focal length `f` in mm and pixel pitch `p` in µm:
+
+`altitude_m = f_mm × GSD_m_per_px × 1000 / p_µm`
+
+`footprint_m = sensor_size_mm × GSD_m_per_px × 1000 / p_µm`
+
+An altitude override changes the effective GSD. The current target overlaps are 60% along-track and 30% across-track. The corrected number of strips preserves the minimum across-track overlap. API `flight_time` is in **seconds**; the interface and plot show **minutes**.
+
+## Test and deployment
 
 ```bash
-# Uruchomienie aplikacji w kontenerze Docker
-docker-compose up --build
+python manage.py test
+python manage.py makemigrations --check --dry-run
 ```
-Aplikacja będzie dostępna pod adresem: **http://0.0.0.0:8000/**
 
-## Użytkowanie aplikacji
+Tests cover physical units, overlap, altitude overrides, invalid inputs, resource limits and CSRF. Inputs must be finite and positive; visualizations are capped at 2,000 images. POST endpoints use Django CSRF protection.
 
-### Parametry wejściowe
+For HTTPS deployment set `DJANGO_DEBUG=0`, a strong random `DJANGO_SECRET_KEY`, explicit `DJANGO_ALLOWED_HOSTS`, trusted origins and a persistent `DJANGO_DB_PATH`. Enable `DJANGO_TRUST_PROXY=1` only behind a proxy that overwrites the forwarded protocol header. Run `python manage.py check --deploy`; configure backups and health monitoring.
 
-1. **Wielkość obszaru [m]**
-   - Szerokość (Dx): wymiar obszaru w kierunku X
-   - Wysokość (Dy): wymiar obszaru w kierunku Y
+**Scope:** a flat-ground planning model for vertical imagery. It does not model terrain, wind, turns, airspace constraints, drone autopilot missions or operational flight safety. This is a geometry demo, not an operational navigation system. The duration estimate excludes turns and takeoff/landing.
 
-2. **GSD [m/pixel]**
-   - Docelowa wielkość piksela terenowego (Ground Sample Distance)
-
-3. **Model kamery**
-   - Wybór z predefiniowanych kamer fotogrametrycznych
-   - Zawiera parametry: ogniskowa, rozmiar matrycy, wielkość piksela
-
-4. **Model samolotu**
-   - Wybór z predefiniowanych samolotów
-   - Zawiera parametry: prędkość przelotowa, maksymalna wysokość
-
-### Wyniki obliczeń
-
-System wyświetla następujące parametry:
-
-- **Wysokość lotu [m]** - obliczona wysokość dla zadanego GSD
-- **Zasięgi terenowe X/Y [m]** - rozmiary pojedynczego zdjęcia na terenie
-- **Bazy zdjęć [m]** - odległości między centrami kolejnych zdjęć
-- **Liczba szeregów** - nominalna i skorygowana
-- **Pokrycia [%]** - wzdłużne (p) i poprzeczne (q)
-- **Całkowita liczba zdjęć** - suma zdjęć we wszystkich szeregach
-- **Czas lotu [min]** - szacowany czas wykonania nalotu
-
-### Wizualizacja
-
-Aplikacja generuje interaktywną wizualizację zawierającą:
-
-- 🔴 **Obszar do sfotografowania** - czerwony prostokąt
-- 🔵 **Zasięgi zdjęć** - niebieskie prostokąty
-- ➡️ **Trasy lotu** - niebieskie linie
-- 🔵 **Centra zdjęć** - niebieskie punkty
-- 📊 **Parametry nalotu** - tabela z wynikami
-
-![img.png](img.png)
-
-![img_1.png](img_1.png)
-
-## Funkcje automatyczne
-
-- **Walidacja danych** - sprawdzanie poprawności wprowadzanych wartości
-- **Automatyczne odświeżanie** - przeliczanie po zmianie parametrów (z opóźnieniem 1s)
-- **Komunikaty błędów** - informowanie o problemach
-- **Responsywny design** - dostosowanie do różnych rozmiarów ekranów
-
-
-
-## Wymagania systemowe
-
-- **Python**: 3.8+
-- **Django**: 4.2+
-- **Matplotlib**: 3.7+
-- **NumPy**: 1.24+
-- **Pillow**: 10.0+
-
-## Architektura rozwiązania
-
-### Backend (Django)
-- **Models**: definicje kamer i samolotów
-- **Views**: logika obliczeń i generowania wizualizacji
-- **FlightPlanCalculator**: klasa do obliczeń parametrów nalotu
-
-### Frontend
-- **HTML5**: struktura interfejsu
-- **CSS3**: nowoczesny design z gradientami i animacjami
-- **JavaScript**: interaktywność i komunikacja AJAX
-
-### Obliczenia fotogrametryczne
-- Wysokość lotu: `W = (f × GSD × 1000) / pixel_size`
-- Zasięgi terenowe: `L = (sensor_size × GSD × 1000) / pixel_size`
-- Bazy zdjęć: `B = L × (1 - pokrycie)`
-- Liczba szeregów: `n = ceil(obszar / baza)`
-
-## Licencja
-
-Projekt edukacyjny - Podstawy Fotogrametrii
-Politechnika Warszawska - Wydział Geodezji i Kartografii
+For a CV portfolio, pair the planner with a reconstruction case study showing how GSD and overlap affect data quality. [Security notes](SECURITY.md).
